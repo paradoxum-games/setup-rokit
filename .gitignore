@@ -1,0 +1,77 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║                  Roblox + Rokit .gitignore               ║
+# ║   (works great with Rojo, Wally, Darklua, etc.)          ║
+# ╚══════════════════════════════════════════════════════════╝
+
+# ── Rokit (replaces Aftman/Foreman) ───────────────────────
+.rokit/
+
+# ── Built places / exports ────────────────────────────────
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbmxl
+build/
+out/
+export/
+
+# ── Wally package manager ─────────────────────────────────
+/wally/
+/packages/
+/.wally-toml.lock   # optional – you can commit this if you want lockfile reproducibility
+
+# ── Rojo project files ───────────────────────────────────
+default.project.json
+*.project.json     # if you use multiple (e.g. test.project.json)
+
+# ── Darklua (bundling/obfuscation) ───────────────────────
+.darklua.json
+.darklua/
+
+# ── Node / JavaScript (if you have any scripts or tooling) ──
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+package-lock.json
+yarn.lock
+
+# ── VS Code ──────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json    # optionally commit recommended extensions
+!.vscode/settings.json      # optionally commit workspace settings
+
+# ── JetBrains / Rider ────────────────────────────────────
+.idea/
+*.iml
+
+# ── macOS ────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Windows ──────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Logs & temp files ────────────────────────────────────
+*.log
+*.tmp
+*.cache
+
+# ── Selene / Stylua cache ────────────────────────────────
+.selene/
+.stylua.toml.lock   # if Stylua ever adds one
+
+# ── TestEZ / lemur ───────────────────────────────────────
+test-results/
+lemur/
+
+# ── GitHub Actions cache (optional, but nice to ignore) ──
+.github/actions/cache/
+
+# ── Local dev overrides (never commit these) ─────────────
+local.project.json
+dev.project.json

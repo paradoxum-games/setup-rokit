@@ -1,0 +1,21 @@
+name: 'Setup Rokit'
+description: 'Install and run Rokit, a toolchain manager for Roblox projects'
+inputs:
+  version:
+    description: 'Git tag of Rokit to install (defaults to latest)'
+    required: false
+  path:
+    description: 'Path to directory containing rokit.toml, aftman.toml, or foreman.toml'
+    required: false
+    default: '.'
+  cache:
+    description: 'Enable caching of installed tools'
+    required: false
+    default: 'false'
+  token:
+    description: 'GitHub token to bypass rate limits'
+    required: false
+    default: '${{ github.token }}'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
