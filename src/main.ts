@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import * as cache from '@actions/cache';
+import { getOctokit } from '@actions/github';
 
 // Helper to hash a file for cache key
 async function hashFile(filePath: string): Promise<string> {
@@ -21,7 +22,7 @@ async function hashFile(filePath: string): Promise<string> {
 
 async function main() {
   try {
-    const version = core.getInput('version') || 'latest';
+    let version = core.getInput('version') || 'latest';
     const configPath = core.getInput('path') || '.';
     const cacheTools = core.getBooleanInput('cache');
     const token = core.getInput('token');
@@ -30,50 +31,75 @@ async function main() {
     const nodePlatform = os.platform();
     const nodeArch = os.arch();
 
-    // Map to Rust target platform
-    let rustPlatform: string;
-    let extension = '';
-    let binaryName = 'rokit';
+    // Map to simplified platform names used in Rokit
+    let rokitPlatform: string;
     if (nodePlatform === 'win32') {
-      rustPlatform = 'pc-windows-msvc';
-      extension = '.exe';
-      binaryName += extension;
+      rokitPlatform = 'windows';
     } else if (nodePlatform === 'linux') {
-      rustPlatform = 'unknown-linux-gnu';
+      rokitPlatform = 'linux';
     } else if (nodePlatform === 'darwin') {
-      rustPlatform = 'apple-darwin';
+      rokitPlatform = 'macos';
     } else {
       throw new Error(`Unsupported platform: ${nodePlatform}`);
     }
 
-    // Map to Rust target architecture
-    let rustArch: string;
+    // Map to architecture
+    let rokitArch: string;
     if (nodeArch === 'x64') {
-      rustArch = 'x86_64';
+      rokitArch = 'x86_64';
     } else if (nodeArch === 'arm64') {
-      rustArch = 'aarch64';
+      rokitArch = 'aarch64';
     } else {
       throw new Error(`Unsupported architecture: ${nodeArch}`);
     }
 
-    // Construct download URL
-    let downloadUrl: string;
+    // Get actual version if 'latest'
+    let actualVersion = version;
     if (version === 'latest') {
-      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/latest/download/rokit-${rustArch}-${rustPlatform}${extension}`;
+      const octokit = getOctokit(token);
+      const release = await octokit.rest.repos.getLatestRelease({
+        owner: 'rojo-rbx',
+        repo: 'rokit',
+      });
+      actualVersion = release.data.tag_name.replace(/^v/, ''); // e.g., '1.2.0'
+      version = release.data.tag_name; // For download URL, use the full tag like 'v1.2.0'
+    }
+
+    // Construct download URL
+    const fileName = `rokit-${actualVersion}-${rokitPlatform}-${rokitArch}.zip`;
+    let downloadUrl: string;
+    if (version.startsWith('v')) { // Assuming tags are 'vX.Y.Z'
+      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/${version}/${fileName}`;
     } else {
-      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/${version}/rokit-${rustArch}-${rustPlatform}${extension}`;
+      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/v${actualVersion}/${fileName}`;
     }
 
     core.info(`Downloading Rokit from ${downloadUrl}`);
-    const toolPath = await toolCache.downloadTool(downloadUrl, undefined, token ? `token ${token}` : undefined);
-    const binaryPath = path.join(path.dirname(toolPath), binaryName);
-    await io.cp(toolPath, binaryPath);
+    const zipPath = await toolCache.downloadTool(downloadUrl, undefined, token ? `token ${token}` : undefined);
+
+    // Extract the ZIP
+    const extractedPath = await toolCache.extractZip(zipPath);
+    core.info(`Extracted to ${extractedPath}`);
+
+    // Binary name
+    let binaryName = 'rokit';
+    if (nodePlatform === 'win32') {
+      binaryName += '.exe';
+    }
+    const binaryPath = path.join(extractedPath, binaryName);
+
+    // Ensure binary exists
+    if (!fs.existsSync(binaryPath)) {
+      throw new Error(`Binary not found at ${binaryPath}`);
+    }
+
+    // Chmod if not Windows
     if (nodePlatform !== 'win32') {
       fs.chmodSync(binaryPath, '755');
     }
 
     // Add to PATH
-    core.addPath(path.dirname(binaryPath));
+    core.addPath(extractedPath);
 
     // Find configuration file
     const tomlFiles = ['rokit.toml', 'aftman.toml', 'foreman.toml'];
@@ -93,7 +119,7 @@ async function main() {
     const rokitDir = path.join(os.homedir(), '.rokit');
     if (cacheTools) {
       const tomlHash = await hashFile(configFile);
-      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${version}-${tomlHash}`;
+      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${actualVersion}-${tomlHash}`;
       const cachePaths = [rokitDir];
 
       try {
@@ -115,7 +141,7 @@ async function main() {
     // Optional: Save cache for installed tools
     if (cacheTools) {
       const tomlHash = await hashFile(configFile);
-      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${version}-${tomlHash}`;
+      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${actualVersion}-${tomlHash}`;
       const cachePaths = [rokitDir];
 
       try {
