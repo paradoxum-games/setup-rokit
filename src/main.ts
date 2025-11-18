@@ -9,7 +9,6 @@ import * as crypto from 'crypto';
 import * as cache from '@actions/cache';
 import { getOctokit } from '@actions/github';
 
-// Helper to hash a file for cache key
 async function hashFile(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
@@ -25,135 +24,91 @@ async function main() {
     let version = core.getInput('version') || 'latest';
     const configPath = core.getInput('path') || '.';
     const cacheTools = core.getBooleanInput('cache');
-    const token = core.getInput('token');
+    const token = core.getInput('token') || process.env.GITHUB_TOKEN;
 
-    // Determine Node.js platform and architecture
     const nodePlatform = os.platform();
     const nodeArch = os.arch();
 
-    // Map to simplified platform names used in Rokit
-    let rokitPlatform: string;
-    if (nodePlatform === 'win32') {
-      rokitPlatform = 'windows';
-    } else if (nodePlatform === 'linux') {
-      rokitPlatform = 'linux';
-    } else if (nodePlatform === 'darwin') {
-      rokitPlatform = 'macos';
-    } else {
-      throw new Error(`Unsupported platform: ${nodePlatform}`);
-    }
+    // Rokit platform names
+    const platformMap: Record<string, string> = {
+      win32: 'windows',
+      linux: 'linux',
+      darwin: 'macos',
+    };
+    const rokitPlatform = platformMap[nodePlatform];
+    if (!rokitPlatform) throw new Error(`Unsupported platform: ${nodePlatform}`);
 
-    // Map to architecture
-    let rokitArch: string;
-    if (nodeArch === 'x64') {
-      rokitArch = 'x86_64';
-    } else if (nodeArch === 'arm64') {
-      rokitArch = 'aarch64';
-    } else {
-      throw new Error(`Unsupported architecture: ${nodeArch}`);
-    }
+    const archMap: Record<string, string> = {
+      x64: 'x86_64',
+      arm64: 'aarch64',
+    };
+    const rokitArch = archMap[nodeArch];
+    if (!rokitArch) throw new Error(`Unsupported arch: ${nodeArch}`);
 
-    // Get actual version if 'latest'
-    let actualVersion = version;
+    // Resolve 'latest' to actual tag
+    let tagName = version;
     if (version === 'latest') {
-      const octokit = getOctokit(token);
-      const release = await octokit.rest.repos.getLatestRelease({
+      const octokit = getOctokit(token!);
+      const { data } = await octokit.rest.repos.getLatestRelease({
         owner: 'rojo-rbx',
         repo: 'rokit',
       });
-      actualVersion = release.data.tag_name.replace(/^v/, ''); // e.g., '1.2.0'
-      version = release.data.tag_name; // For download URL, use the full tag like 'v1.2.0'
+      tagName = data.tag_name; // e.g. "v1.2.0"
     }
 
-    // Construct download URL
-    const fileName = `rokit-${actualVersion}-${rokitPlatform}-${rokitArch}.zip`;
-    let downloadUrl: string;
-    if (version.startsWith('v')) { // Assuming tags are 'vX.Y.Z'
-      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/${version}/${fileName}`;
-    } else {
-      downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/v${actualVersion}/${fileName}`;
-    }
+    const cleanVersion = tagName.replace(/^v/, ''); // "1.2.0"
+    const fileName = `rokit-${cleanVersion}-${rokitPlatform}-${rokitArch}.zip`;
+    const downloadUrl = `https://github.com/rojo-rbx/rokit/releases/download/${tagName}/${fileName}`;
 
     core.info(`Downloading Rokit from ${downloadUrl}`);
     const zipPath = await toolCache.downloadTool(downloadUrl, undefined, token ? `token ${token}` : undefined);
+    const extractedFolder = await toolCache.extractZip(zipPath);
 
-    // Extract the ZIP
-    const extractedPath = await toolCache.extractZip(zipPath);
-    core.info(`Extracted to ${extractedPath}`);
+    const binaryName = nodePlatform === 'win32' ? 'rokit.exe' : 'rokit';
+    const binaryPath = path.join(extractedFolder, binaryName);
 
-    // Binary name
-    let binaryName = 'rokit';
-    if (nodePlatform === 'win32') {
-      binaryName += '.exe';
-    }
-    const binaryPath = path.join(extractedPath, binaryName);
-
-    // Ensure binary exists
     if (!fs.existsSync(binaryPath)) {
-      throw new Error(`Binary not found at ${binaryPath}`);
+      throw new Error(`Expected binary not found: ${binaryPath}`);
     }
 
-    // Chmod if not Windows
-    if (nodePlatform !== 'win32') {
-      fs.chmodSync(binaryPath, '755');
-    }
+    if (nodePlatform !== 'win32') fs.chmodSync(binaryPath, '755');
+    core.addPath(extractedFolder);
 
-    // Add to PATH
-    core.addPath(extractedPath);
-
-    // Find configuration file
+    // Find config file
     const tomlFiles = ['rokit.toml', 'aftman.toml', 'foreman.toml'];
     let configFile = '';
-    for (const file of tomlFiles) {
-      const fullPath = path.join(configPath, file);
-      if (fs.existsSync(fullPath)) {
-        configFile = fullPath;
+    for (const f of tomlFiles) {
+      const p = path.join(configPath, f);
+      if (fs.existsSync(p)) {
+        configFile = p;
         break;
       }
     }
-    if (!configFile) {
-      throw new Error('No configuration file found (rokit.toml, aftman.toml, or foreman.toml)');
-    }
+    if (!configFile) throw new Error('No rokit.toml / aftman.toml / foreman.toml found');
 
-    // Optional: Restore cache for installed tools
+    // Cache ~/.rokit
     const rokitDir = path.join(os.homedir(), '.rokit');
     if (cacheTools) {
-      const tomlHash = await hashFile(configFile);
-      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${actualVersion}-${tomlHash}`;
-      const cachePaths = [rokitDir];
-
-      try {
-        const restored = await cache.restoreCache(cachePaths, cacheKey);
-        if (restored) {
-          core.info(`Restored Rokit tools from cache with key ${cacheKey}`);
-        } else {
-          core.info(`No cache hit for key ${cacheKey}`);
-        }
-      } catch (error) {
-        core.warning(`Failed to restore cache: ${(error as Error).message}`);
-      }
+      const hash = await hashFile(configFile);
+      const key = `rokit-tools-${nodePlatform}-${nodeArch}-${cleanVersion}-${hash}`;
+      const restored = await cache.restoreCache([rokitDir], key);
+      if (restored) core.info(`Restored ~/.rokit from cache`);
     }
 
-    // Run Rokit install
-    core.info(`Running Rokit install in directory ${configPath}`);
-    await exec.exec(binaryName, ['install'], { cwd: configPath });
+    // Run install with --trust to bypass interactive prompt in CI
+    core.info('Installing tools with Rokit (auto-trusting everything for CI)');
+    await exec.exec(binaryName, ['install', '--trust'], { cwd: configPath });
 
-    // Optional: Save cache for installed tools
+    // Save cache
     if (cacheTools) {
-      const tomlHash = await hashFile(configFile);
-      const cacheKey = `rokit-tools-${nodePlatform}-${nodeArch}-${actualVersion}-${tomlHash}`;
-      const cachePaths = [rokitDir];
-
-      try {
-        await cache.saveCache(cachePaths, cacheKey);
-        core.info(`Saved Rokit tools to cache with key ${cacheKey}`);
-      } catch (error) {
-        core.warning(`Failed to save cache: ${(error as Error).message}`);
-      }
+      const hash = await hashFile(configFile);
+      const key = `rokit-tools-${nodePlatform}-${nodeArch}-${cleanVersion}-${hash}`;
+      await cache.saveCache([rokitDir], key);
+      core.info('Saved ~/.rokit to cache');
     }
 
   } catch (error) {
-    core.setFailed((error as Error).message);
+    core.setFailed((error as Error)?.message || 'Unknown error');
   }
 }
 
