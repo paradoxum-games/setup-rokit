@@ -108,7 +108,7 @@ function main() {
             }
             // Run install with --trust to bypass interactive prompt in CI
             core.info('Installing tools with Rokit (auto-trusting everything for CI)');
-            yield exec.exec(binaryName, ['install', '--trust'], { cwd: configPath });
+            yield exec.exec(binaryName, ['install', '--no-trust-check'], { cwd: configPath });
             // Save cache
             if (cacheTools) {
                 const hash = yield hashFile(configFile);
