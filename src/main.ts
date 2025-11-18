@@ -1,6 +1,5 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
-import * as io from '@actions/io';
 import * as toolCache from '@actions/tool-cache';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -115,17 +114,6 @@ async function main() {
       throw new Error('No configuration file found (rokit.toml, aftman.toml, or foreman.toml)');
     }
 
-    // Set auto-trust config to make tools trusted automatically
-    let rokitConfigDir: string;
-    if (nodePlatform === 'win32') {
-      rokitConfigDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'rokit');
-    } else {
-      rokitConfigDir = path.join(os.homedir(), '.config', 'rokit');
-    }
-    await io.mkdirP(rokitConfigDir);
-    const rokitConfigPath = path.join(rokitConfigDir, 'config.toml');
-    fs.writeFileSync(rokitConfigPath, 'auto-trust = true\n');
-
     // Optional: Restore cache for installed tools
     const rokitDir = path.join(os.homedir(), '.rokit');
     if (cacheTools) {
@@ -145,9 +133,9 @@ async function main() {
       }
     }
 
-    // Run Rokit install
+    // Run Rokit install with --no-trust-check to bypass trust prompts in CI
     core.info(`Running Rokit install in directory ${configPath}`);
-    await exec.exec(binaryName, ['install'], { cwd: configPath });
+    await exec.exec(binaryName, ['install', '--no-trust-check'], { cwd: configPath });
 
     // Explicitly add ~/.rokit/bin to PATH for direct tool usage
     const rokitBinDir = path.join(rokitDir, 'bin');
